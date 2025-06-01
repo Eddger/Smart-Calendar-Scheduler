@@ -5,6 +5,7 @@ const CalendarScheduler = () => {
   // Main state management
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [gapi, setGapi] = useState(null);
+  const [gapiLoaded, setGapiLoaded] = useState(false);
   const [currentStep, setCurrentStep] = useState('setup');
   const [userSettings, setUserSettings] = useState({
     dailyTimeWindow: { start: '06:00', end: '22:00' },
@@ -42,27 +43,70 @@ const CalendarScheduler = () => {
   // Initialize Google API
   useEffect(() => {
     const initializeGapi = async () => {
-      if (window.gapi) {
-        await window.gapi.load('auth2', async () => {
-          await window.gapi.auth2.init({
-            client_id: CLIENT_ID,
+      try {
+        if (!window.gapi) {
+          throw new Error('Google API script not loaded');
+        }
+
+        // Initialize the auth2 library
+        await new Promise((resolve, reject) => {
+          window.gapi.load('auth2', {
+            callback: resolve,
+            onerror: () => reject(new Error('Failed to load auth2'))
           });
         });
-        await window.gapi.load('client', async () => {
-          await window.gapi.client.init({
-            apiKey: API_KEY,
-            discoveryDocs: [DISCOVERY_DOC],
+
+        // Initialize the client library
+        await new Promise((resolve, reject) => {
+          window.gapi.load('client', {
+            callback: resolve,
+            onerror: () => reject(new Error('Failed to load client'))
           });
         });
+
+        // Initialize auth2
+        await window.gapi.auth2.init({
+          client_id: CLIENT_ID,
+        });
+
+        // Initialize client
+        await window.gapi.client.init({
+          apiKey: API_KEY,
+          discoveryDocs: [DISCOVERY_DOC],
+        });
+
         setGapi(window.gapi);
+        setGapiLoaded(true);
+        setError('');
+
+        // Check if user is already signed in
+        const authInstance = window.gapi.auth2.getAuthInstance();
+        const isSignedIn = authInstance.isSignedIn.get();
+        if (isSignedIn) {
+          setIsAuthenticated(true);
+          await loadCalendarEvents();
+        }
+
+      } catch (err) {
+        console.error('Failed to initialize Google API:', err);
+        setError(`Failed to initialize Google API: ${err.message}`);
+        setGapiLoaded(false);
       }
     };
 
-    // Load Google API script
+    // Load Google API script if not already loaded
     if (!window.gapi) {
       const script = document.createElement('script');
       script.src = 'https://apis.google.com/js/api.js';
-      script.onload = initializeGapi;
+      script.async = true;
+      script.defer = true;
+      script.onload = () => {
+        console.log('Google API script loaded');
+        initializeGapi();
+      };
+      script.onerror = () => {
+        setError('Failed to load Google API script');
+      };
       document.body.appendChild(script);
     } else {
       initializeGapi();
@@ -71,15 +115,49 @@ const CalendarScheduler = () => {
 
   // Authentication functions
   const signIn = async () => {
-    if (!gapi) return;
+    if (!gapi || !gapiLoaded) {
+      setError('Google API not ready. Please wait and try again.');
+      return;
+    }
+
     try {
       setLoading(true);
+      setError('');
+
       const authInstance = gapi.auth2.getAuthInstance();
-      await authInstance.signIn();
+      if (!authInstance) {
+        throw new Error('Auth instance not initialized');
+      }
+
+      // Check if already signed in
+      if (authInstance.isSignedIn.get()) {
+        setIsAuthenticated(true);
+        await loadCalendarEvents();
+        return;
+      }
+
+      // Sign in user
+      const user = await authInstance.signIn({
+        scope: SCOPES
+      });
+
+      if (!user) {
+        throw new Error('Sign in failed - no user returned');
+      }
+
+      // Check if user granted required permissions
+      const hasRequiredScope = user.hasGrantedScopes(SCOPES);
+      if (!hasRequiredScope) {
+        throw new Error('Required calendar permissions not granted');
+      }
+
       setIsAuthenticated(true);
       await loadCalendarEvents();
+
     } catch (err) {
-      setError('Failed to sign in: ' + err.message);
+      console.error('Sign in error:', err);
+      setError(`Sign in failed: ${err.message || 'Unknown error occurred'}`);
+      setIsAuthenticated(false);
     } finally {
       setLoading(false);
     }
@@ -87,17 +165,27 @@ const CalendarScheduler = () => {
 
   const signOut = async () => {
     if (!gapi) return;
-    const authInstance = gapi.auth2.getAuthInstance();
-    await authInstance.signOut();
-    setIsAuthenticated(false);
-    setCurrentStep('setup');
-    setCalendarEvents([]);
-    setSuggestions([]);
+    
+    try {
+      const authInstance = gapi.auth2.getAuthInstance();
+      if (authInstance) {
+        await authInstance.signOut();
+      }
+      setIsAuthenticated(false);
+      setCurrentStep('setup');
+      setCalendarEvents([]);
+      setSuggestions([]);
+      setError('');
+    } catch (err) {
+      console.error('Sign out error:', err);
+      setError('Failed to sign out');
+    }
   };
 
   // Calendar API functions
   const loadCalendarEvents = async () => {
-    if (!gapi) return;
+    if (!gapi || !isAuthenticated) return;
+    
     try {
       setLoading(true);
       const now = new Date();
@@ -114,14 +202,16 @@ const CalendarScheduler = () => {
       
       setCalendarEvents(response.result.items || []);
     } catch (err) {
-      setError('Failed to load calendar events: ' + err.message);
+      console.error('Load calendar events error:', err);
+      setError('Failed to load calendar events: ' + (err.message || 'Unknown error'));
     } finally {
       setLoading(false);
     }
   };
 
   const createCalendarEvent = async (event) => {
-    if (!gapi) return;
+    if (!gapi || !isAuthenticated) return null;
+    
     try {
       const response = await gapi.client.calendar.events.insert({
         calendarId: 'primary',
@@ -129,7 +219,8 @@ const CalendarScheduler = () => {
       });
       return response.result;
     } catch (err) {
-      setError('Failed to create event: ' + err.message);
+      console.error('Create calendar event error:', err);
+      setError('Failed to create event: ' + (err.message || 'Unknown error'));
       return null;
     }
   };
@@ -255,31 +346,36 @@ const CalendarScheduler = () => {
     setLoading(true);
     const acceptedSuggestions = suggestions.filter(s => s.accepted);
     
-    for (const suggestion of acceptedSuggestions) {
-      const event = {
-        summary: suggestion.activityName,
-        start: {
-          dateTime: suggestion.start.toISOString(),
-          timeZone: userSettings.timezone
-        },
-        end: {
-          dateTime: suggestion.end.toISOString(),
-          timeZone: userSettings.timezone
-        },
-        reminders: {
-          useDefault: false,
-          overrides: [
-            { method: 'popup', minutes: 10 }
-          ]
-        }
-      };
+    try {
+      for (const suggestion of acceptedSuggestions) {
+        const event = {
+          summary: suggestion.activityName,
+          start: {
+            dateTime: suggestion.start.toISOString(),
+            timeZone: userSettings.timezone
+          },
+          end: {
+            dateTime: suggestion.end.toISOString(),
+            timeZone: userSettings.timezone
+          },
+          reminders: {
+            useDefault: false,
+            overrides: [
+              { method: 'popup', minutes: 10 }
+            ]
+          }
+        };
+        
+        await createCalendarEvent(event);
+      }
       
-      await createCalendarEvent(event);
+      await loadCalendarEvents();
+      setCurrentStep('complete');
+    } catch (err) {
+      setError('Failed to finalize schedule: ' + (err.message || 'Unknown error'));
+    } finally {
+      setLoading(false);
     }
-    
-    await loadCalendarEvents();
-    setCurrentStep('complete');
-    setLoading(false);
   };
 
   // Constant activity functions
@@ -330,18 +426,29 @@ const CalendarScheduler = () => {
             {error}
           </div>
         )}
+
+        {!CLIENT_ID || !API_KEY ? (
+          <div className="mb-4 p-3 bg-yellow-100 border border-yellow-300 rounded-lg text-yellow-700 text-sm">
+            <p className="font-medium mb-2">Configuration Required</p>
+            <p>Please add your Google OAuth credentials:</p>
+            <ul className="text-left mt-2 space-y-1">
+              <li>• REACT_APP_GOOGLE_CLIENT_ID</li>
+              <li>• REACT_APP_GOOGLE_API_KEY</li>
+            </ul>
+          </div>
+        ) : null}
         
         <button
           onClick={signIn}
-          disabled={loading || !gapi}
+          disabled={loading || !gapiLoaded || !CLIENT_ID || !API_KEY}
           className="w-full bg-indigo-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
-          {loading ? 'Connecting...' : 'Connect Google Calendar'}
+          {loading ? 'Connecting...' : gapiLoaded ? 'Connect Google Calendar' : 'Loading...'}
         </button>
         
         <div className="mt-6 text-xs text-gray-500">
-          <p>Note: You'll need to configure Google OAuth credentials for this to work.</p>
-          <p>See setup instructions in the code comments.</p>
+          <p>This app requires access to your Google Calendar to function.</p>
+          <p>Your data is processed locally and never stored on our servers.</p>
         </div>
       </div>
     </div>
@@ -357,6 +464,12 @@ const CalendarScheduler = () => {
               <LogOut className="h-5 w-5" />
             </button>
           </div>
+          
+          {error && (
+            <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded-lg text-red-700 text-sm">
+              {error}
+            </div>
+          )}
           
           <div className="space-y-6">
             <div>
