@@ -18,6 +18,21 @@ const CalendarScheduler = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // Form state for constant activities
+  const [newConstantActivity, setNewConstantActivity] = useState({
+    name: '',
+    startTime: '09:00',
+    duration: 60,
+    days: [1, 2, 3, 4, 5] // Weekdays
+  });
+
+  // Form state for flexible activities
+  const [newFlexibleActivity, setNewFlexibleActivity] = useState({
+    name: '',
+    duration: 60,
+    days: []
+  });
+
   // Google Calendar API configuration
   const CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID;
   const API_KEY = process.env.REACT_APP_GOOGLE_API_KEY;
@@ -52,7 +67,7 @@ const CalendarScheduler = () => {
     } else {
       initializeGapi();
     }
-  }, []);
+  }, [CLIENT_ID, API_KEY]);
 
   // Authentication functions
   const signIn = async () => {
@@ -267,6 +282,39 @@ const CalendarScheduler = () => {
     setLoading(false);
   };
 
+  // Constant activity functions
+  const addConstantActivity = () => {
+    if (newConstantActivity.name.trim()) {
+      setConstantActivities(prev => [...prev, {...newConstantActivity, id: Date.now()}]);
+      setNewConstantActivity({
+        name: '',
+        startTime: '09:00',
+        duration: 60,
+        days: [1, 2, 3, 4, 5]
+      });
+    }
+  };
+
+  const removeConstantActivity = (id) => {
+    setConstantActivities(prev => prev.filter(a => a.id !== id));
+  };
+
+  // Flexible activity functions
+  const addFlexibleActivity = () => {
+    if (newFlexibleActivity.name.trim()) {
+      setFlexibleActivities(prev => [...prev, {...newFlexibleActivity, id: Date.now()}]);
+      setNewFlexibleActivity({
+        name: '',
+        duration: 60,
+        days: []
+      });
+    }
+  };
+
+  const removeFlexibleActivity = (id) => {
+    setFlexibleActivities(prev => prev.filter(a => a.id !== id));
+  };
+
   // Component renders
   const renderAuthScreen = () => (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
@@ -371,29 +419,6 @@ const CalendarScheduler = () => {
   );
 
   const renderConstantActivities = () => {
-    const [newActivity, setNewActivity] = useState({
-      name: '',
-      startTime: '09:00',
-      duration: 60,
-      days: [1, 2, 3, 4, 5] // Weekdays
-    });
-
-    const addConstantActivity = () => {
-      if (newActivity.name.trim()) {
-        setConstantActivities(prev => [...prev, {...newActivity, id: Date.now()}]);
-        setNewActivity({
-          name: '',
-          startTime: '09:00',
-          duration: 60,
-          days: [1, 2, 3, 4, 5]
-        });
-      }
-    };
-
-    const removeConstantActivity = (id) => {
-      setConstantActivities(prev => prev.filter(a => a.id !== id));
-    };
-
     const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
     return (
@@ -409,8 +434,8 @@ const CalendarScheduler = () => {
                   <input
                     type="text"
                     placeholder="Activity name (e.g., Work, Gym)"
-                    value={newActivity.name}
-                    onChange={(e) => setNewActivity(prev => ({...prev, name: e.target.value}))}
+                    value={newConstantActivity.name}
+                    onChange={(e) => setNewConstantActivity(prev => ({...prev, name: e.target.value}))}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   />
                   
@@ -419,8 +444,8 @@ const CalendarScheduler = () => {
                       <label className="block text-sm text-gray-700 mb-1">Start Time</label>
                       <input
                         type="time"
-                        value={newActivity.startTime}
-                        onChange={(e) => setNewActivity(prev => ({...prev, startTime: e.target.value}))}
+                        value={newConstantActivity.startTime}
+                        onChange={(e) => setNewConstantActivity(prev => ({...prev, startTime: e.target.value}))}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                       />
                     </div>
@@ -428,8 +453,8 @@ const CalendarScheduler = () => {
                       <label className="block text-sm text-gray-700 mb-1">Duration (minutes)</label>
                       <input
                         type="number"
-                        value={newActivity.duration}
-                        onChange={(e) => setNewActivity(prev => ({...prev, duration: parseInt(e.target.value)}))}
+                        value={newConstantActivity.duration}
+                        onChange={(e) => setNewConstantActivity(prev => ({...prev, duration: parseInt(e.target.value)}))}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                       />
                     </div>
@@ -443,13 +468,13 @@ const CalendarScheduler = () => {
                           key={index}
                           type="button"
                           onClick={() => {
-                            const newDays = newActivity.days.includes(index)
-                              ? newActivity.days.filter(d => d !== index)
-                              : [...newActivity.days, index];
-                            setNewActivity(prev => ({...prev, days: newDays}));
+                            const newDays = newConstantActivity.days.includes(index)
+                              ? newConstantActivity.days.filter(d => d !== index)
+                              : [...newConstantActivity.days, index];
+                            setNewConstantActivity(prev => ({...prev, days: newDays}));
                           }}
                           className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
-                            newActivity.days.includes(index)
+                            newConstantActivity.days.includes(index)
                               ? 'bg-indigo-600 text-white'
                               : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                           }`}
@@ -462,7 +487,7 @@ const CalendarScheduler = () => {
                   
                   <button
                     onClick={addConstantActivity}
-                    disabled={!newActivity.name.trim()}
+                    disabled={!newConstantActivity.name.trim()}
                     className="w-full bg-indigo-600 text-white py-2 px-4 rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     <Plus className="inline h-4 w-4 mr-2" />
@@ -524,27 +549,6 @@ const CalendarScheduler = () => {
   };
 
   const renderFlexibleActivities = () => {
-    const [newActivity, setNewActivity] = useState({
-      name: '',
-      duration: 60,
-      days: []
-    });
-
-    const addFlexibleActivity = () => {
-      if (newActivity.name.trim()) {
-        setFlexibleActivities(prev => [...prev, {...newActivity, id: Date.now()}]);
-        setNewActivity({
-          name: '',
-          duration: 60,
-          days: []
-        });
-      }
-    };
-
-    const removeFlexibleActivity = (id) => {
-      setFlexibleActivities(prev => prev.filter(a => a.id !== id));
-    };
-
     return (
       <div className="min-h-screen bg-gray-50 p-4">
         <div className="max-w-4xl mx-auto">
@@ -558,8 +562,8 @@ const CalendarScheduler = () => {
                   <input
                     type="text"
                     placeholder="Activity name (e.g., Reading, Coding)"
-                    value={newActivity.name}
-                    onChange={(e) => setNewActivity(prev => ({...prev, name: e.target.value}))}
+                    value={newFlexibleActivity.name}
+                    onChange={(e) => setNewFlexibleActivity(prev => ({...prev, name: e.target.value}))}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   />
                   
@@ -567,15 +571,15 @@ const CalendarScheduler = () => {
                     <label className="block text-sm text-gray-700 mb-1">Duration per session (minutes)</label>
                     <input
                       type="number"
-                      value={newActivity.duration}
-                      onChange={(e) => setNewActivity(prev => ({...prev, duration: parseInt(e.target.value)}))}
+                      value={newFlexibleActivity.duration}
+                      onChange={(e) => setNewFlexibleActivity(prev => ({...prev, duration: parseInt(e.target.value)}))}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                     />
                   </div>
                   
                   <button
                     onClick={addFlexibleActivity}
-                    disabled={!newActivity.name.trim()}
+                    disabled={!newFlexibleActivity.name.trim()}
                     className="w-full bg-indigo-600 text-white py-2 px-4 rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     <Plus className="inline h-4 w-4 mr-2" />
